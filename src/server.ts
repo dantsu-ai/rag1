@@ -1,8 +1,8 @@
-import { mkdir } from 'fs/promises';
+import { mkdir, unlink, stat } from 'fs/promises';
 import { join, basename } from 'path';
 import { answerQuestion } from './query-pipeline';
-import { ingestFile } from './ingest-pipeline';
-import { listSources } from './lib/store';
+import { ingestFile, forgetInState } from './ingest-pipeline';
+import { listSources, deleteSource } from './lib/store';
 import { listGenerationModels } from './lib/models';
 import { getGenerationModel, setGenerationModel } from './lib/runtime';
 import { CONFIG } from './config-shim';
@@ -85,8 +85,40 @@ const server = Bun.serve({
       return Response.json({ results });
     }
 
+    // ── delete one or more indexed documents (index + stored original + ingest-state) ──
+    if (p === '/delete' && req.method === 'POST') {
+      const body = (await req.json().catch(() => ({}))) as { files?: string[]; file?: string };
+      const requested = body.files ?? (body.file ? [body.file] : []);
+      if (requested.length === 0) return Response.json({ error: 'body { "files": ["..."] } required' }, { status: 400 });
+      if (requested.length > 1000) return Response.json({ error: 'too many files (max 1000)' }, { status: 400 });
+      const files = [...new Set(requested.map(String))]; // dedupe
+      const results: Array<{ file: string; chunks_removed: number; original_purged: boolean; error?: string }> = [];
+      for (const raw of files) {
+        // basename() strips any directory parts; reject '', '.', '..' so we never touch a directory or escape uploadsPath.
+        const name = basename(raw);
+        if (!name || name === '.' || name === '..') {
+          results.push({ file: raw, chunks_removed: 0, original_purged: false, error: 'invalid name' });
+          continue;
+        }
+        try {
+          const chunks_removed = await deleteSource(name);
+          let original_purged = false;
+          const orig = join(CONFIG.uploadsPath, name);
+          try {
+            if ((await stat(orig)).isFile()) { await unlink(orig); original_purged = true; }
+          } catch { /* original not present — nothing to purge */ }
+          await forgetInState(name);
+          results.push({ file: name, chunks_removed, original_purged });
+        } catch (e) {
+          // one bad entry must never abort the batch or 500 the request
+          results.push({ file: name, chunks_removed: 0, original_purged: false, error: String(e) });
+        }
+      }
+      return Response.json({ results });
+    }
+
     return Response.json(
-      { error: 'not found', endpoints: ['GET /', 'GET /health', 'GET /models', 'POST /model', 'GET /query?q=', 'POST /query', 'GET /sources', 'POST /upload'] },
+      { error: 'not found', endpoints: ['GET /', 'GET /health', 'GET /models', 'POST /model', 'GET /query?q=', 'POST /query', 'GET /sources', 'POST /upload', 'POST /delete'] },
       { status: 404 },
     );
   },

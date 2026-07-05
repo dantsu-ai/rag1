@@ -20,6 +20,17 @@ async function saveState(state: IngestState): Promise<void> {
   await writeFile(CONFIG.ingestStatePath, JSON.stringify(state, null, 1), 'utf-8');
 }
 
+/** Drop any ingest-state entries whose file basename matches, so a purged file can be cleanly re-added later. */
+export async function forgetInState(sourceBasename: string): Promise<void> {
+  if (!existsSync(CONFIG.ingestStatePath)) return;
+  const state = await loadState();
+  let changed = false;
+  for (const key of Object.keys(state)) {
+    if (basename(key) === sourceBasename) { delete state[key]; changed = true; }
+  }
+  if (changed) await saveState(state);
+}
+
 export async function ingestFile(filePath: string): Promise<number> {
   const text = await extractText(filePath);
   const chunks = chunkText(text);

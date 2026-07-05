@@ -37,6 +37,16 @@ export async function upsertChunks(rows: ChunkRow[]): Promise<void> {
   await tbl.add(rows);
 }
 
+/** Remove every chunk for one source file. Returns how many rows were deleted. */
+export async function deleteSource(source_file: string): Promise<number> {
+  const tbl = await table();
+  if (!tbl) return 0;
+  const src = source_file.replace(/'/g, "''");
+  const before = await tbl.countRows(`source_file = '${src}'`);
+  if (before > 0) await tbl.delete(`source_file = '${src}'`);
+  return before;
+}
+
 /** Cosine search — angle, not magnitude (L2 would be magnitude-sensitive). */
 export async function queryStore(embedding: number[], topK: number): Promise<ChunkRow[]> {
   const tbl = await table();
