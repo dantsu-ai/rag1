@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local RAG — mac mini</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --border: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa3b2; --accent: #4c8bf5; --accent-dim: #2d4a7a;
+    --ok: #3fb970; --err: #e5534b; --user: #24303f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f5f6f8; --panel:#fff; --panel2:#eef0f4; --border:#d8dce3;
+      --text:#1a1d22; --muted:#5a6472; --accent:#2f6fe0; --accent-dim:#bcd2f7; --user:#e4ecf8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); display: inline-block; }
+  header .dot.ok { background: var(--ok); }
+  .grow { flex: 1; }
+  select, button, input { font: inherit; color: var(--text); }
+  select { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  button { background: var(--accent); border: 0; color: #fff; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { max-width: 880px; margin: 0 auto; padding: 16px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  #drop { border: 1.5px dashed var(--border); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  #drop.hot { border-color: var(--accent); color: var(--text); background: var(--panel2); }
+  #sources { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  #chat { display: flex; flex-direction: column; gap: 12px; min-height: 120px; }
+  .msg { padding: 10px 13px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { background: var(--user); align-self: flex-end; max-width: 85%; }
+  .msg.bot { background: var(--panel2); border: 1px solid var(--border); }
+  .msg .cites { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .msg .cites code { background: var(--accent-dim); color: var(--text); padding: 1px 6px; border-radius: 5px; margin-right: 5px; }
+  .composer { display: flex; gap: 10px; margin-top: 12px; }
+  .composer textarea { flex: 1; resize: none; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font: inherit; min-height: 46px; }
+  .thinking { color: var(--muted); font-style: italic; }
+  .toast { font-size: 13px; color: var(--muted); min-height: 18px; }
+  .toast.err { color: var(--err); } .toast.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="health-dot"></span>
+  <h1>Local RAG · mac mini</h1>
+  <span class="grow"></span>
+  <label class="row" style="gap:6px;font-size:13px;color:var(--muted)">model
+    <select id="model-select"><option>loading…</option></select>
+  </label>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Documents</h2>
+    <div id="drop">Drop <b>.pdf · .txt · .md</b> here, or click to choose</div>
+    <input type="file" id="file-input" accept=".pdf,.txt,.md" multiple hidden>
+    <div class="toast" id="upload-toast"></div>
+    <div id="sources">indexed: —</div>
+  </div>
+
+  <div class="card">
+    <h2>Chat</h2>
+    <div id="chat"></div>
+    <div class="composer">
+      <textarea id="q" placeholder="Ask a question about your documents…" rows="1"></textarea>
+      <button id="send">Send</button>
+    </div>
+    <div class="toast" id="chat-toast"></div>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = async (path, opts) => (await fetch(path, opts)).json();
+
+// ── health + model list ──
+async function refreshHealth() {
+  try { const h = await api('/health'); $('#health-dot').classList.add('ok'); return h; }
+  catch { $('#health-dot').classList.remove('ok'); }
+}
+async function loadModels() {
+  try {
+    const { current, models } = await api('/models');
+    const sel = $('#model-select'); sel.innerHTML = '';
+    for (const m of models) {
+      const o = document.createElement('option');
+      o.value = m.name; o.textContent = m.name + '  (' + (m.size/1e9).toFixed(1) + ' GB)';
+      if (m.name === current) o.selected = true;
+      sel.appendChild(o);
+    }
+  } catch { $('#model-select').innerHTML = '<option>error</option>'; }
+}
+$('#model-select').addEventListener('change', async (e) => {
+  const r = await api('/model', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ model: e.target.value }) });
+  toast('#chat-toast', r.current ? ('model → ' + r.current) : ('error: ' + r.error), r.current ? 'ok' : 'err');
+});
+
+// ── sources ──
+async function loadSources() {
+  try {
+    const s = await api('/sources');
+    $('#sources').textContent = s.length
+      ? 'indexed: ' + s.map(x => x.source_file + ' (' + x.chunks + ')').join(', ')
+      : 'indexed: nothing yet';
+  } catch {}
+}
+
+// ── upload ──
+const drop = $('#drop'), fileInput = $('#file-input');
+drop.addEventListener('click', () => fileInput.click());
+;['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+;['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
+
+async function uploadFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  toast('#upload-toast', 'uploading ' + files.length + ' file(s)… embedding may take a moment', '');
+  const fd = new FormData();
+  for (const f of files) fd.append('file', f);
+  try {
+    const { results } = await api('/upload', { method:'POST', body: fd });
+    const ok = results.filter(r => r.chunks != null);
+    const bad = results.filter(r => r.error);
+    toast('#upload-toast',
+      ok.map(r => r.file + ': ' + r.chunks + ' chunks').concat(bad.map(r => r.file + ': ' + r.error)).join(' · '),
+      bad.length ? 'err' : 'ok');
+    loadSources();
+  } catch (e) { toast('#upload-toast', 'upload failed: ' + e, 'err'); }
+}
+
+// ── chat ──
+const chat = $('#chat'), qBox = $('#q');
+function bubble(cls, text) {
+  const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text;
+  chat.appendChild(d); d.scrollIntoView({ block:'end' }); return d;
+}
+async function send() {
+  const q = qBox.value.trim(); if (!q) return;
+  qBox.value = ''; $('#send').disabled = true;
+  bubble('user', q);
+  const pending = bubble('bot thinking', 'thinking…');
+  try {
+    const r = await api('/query', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question: q }) });
+    pending.classList.remove('thinking');
+    pending.textContent = r.answer || r.error || '(no answer)';
+    if (r.sources && r.sources.length) {
+      const c = document.createElement('div'); c.className = 'cites';
+      c.innerHTML = 'sources: ' + r.sources.map(s => '<code>' + s.source_file + '#' + s.chunk_index + '</code>').join('');
+      pending.appendChild(c);
+    }
+  } catch (e) { pending.classList.remove('thinking'); pending.textContent = 'error: ' + e; }
+  $('#send').disabled = false; qBox.focus();
+}
+$('#send').addEventListener('click', send);
+qBox.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+
+function toast(sel, msg, kind) { const t = $(sel); t.textContent = msg; t.className = 'toast ' + (kind||''); }
+
+// ── init ──
+refreshHealth(); loadModels(); loadSources();
+setInterval(refreshHealth, 15000);
+</script>
+</body>
+</html>

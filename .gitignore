@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Runtime data (documents, vectors, uploads) — never commit
+.rag/
+uploads/
+
+# Vendored binaries (installer downloads these)
+bin/ollama
+bin/*.dylib
+bin/*.so
+bin/llama-*
+bin/mlx_metal_*
+
+# Logs
+*.log
+
+# Build output
+dist/
+
+# macOS
+.DS_Store

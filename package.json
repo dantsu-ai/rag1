@@ -1,0 +1,20 @@
+{
+  "name": "rag",
+  "version": "2.0.0",
+  "description": "Local RAG — Bun + LanceDB + Ollama, running as non-privileged 'rag' user",
+  "type": "module",
+  "scripts": {
+    "server": "bun run src/server.ts",
+    "ingest": "bun run src/ingest-pipeline.ts",
+    "query": "bun run src/query-pipeline.ts"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.21.0",
+    "pdfjs-dist": "^4.10.38",
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/bun": "^1.2.0"
+  }
+}
