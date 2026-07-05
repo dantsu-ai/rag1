@@ -140,6 +140,7 @@ Open `http://<MAC_MINI_IP>:3737`. You get:
 - a **model dropdown** (switch the generation model at runtime — no restart),
 - **drag-and-drop upload** for `.pdf` / `.txt` / `.md` files,
 - a **chat box** that answers from your documents with source-citation chips.
+- a **document list** — every indexed file with its chunk count, with checkboxes to select one or many and a **Delete selected** button (with a confirmation prompt) that removes them completely.
 
 Upload a few documents, then ask a question. Answers cite the source file they came from.
 
@@ -152,6 +153,11 @@ curl -F "file=@/path/to/doc1.pdf" -F "file=@/path/to/doc2.md" \
 
 # List what's indexed
 curl http://$RAG_HOST:3737/sources
+
+# Delete one or more documents (removes index rows, the stored original, and ingest-state)
+curl -X POST http://$RAG_HOST:3737/delete \
+  -H "Content-Type: application/json" \
+  -d '{"files":["old-doc.pdf","stale-notes.md"]}'
 
 # Ask a question (GET)
 curl "http://$RAG_HOST:3737/query?q=What%20is%20IEC%2062443%20SL-2%3F"
@@ -184,6 +190,7 @@ bun run query "your question here"    # one-off query
 | `GET`  | `/query?q=...` | Ask a question |
 | `POST` | `/query` | Ask a question (`{"question":"..."}`) |
 | `POST` | `/upload` | Upload `.pdf`/`.txt`/`.md` (multipart field `file`, one or many) |
+| `POST` | `/delete` | Remove one or more documents — index rows + stored original + ingest-state (`{"files":["..."]}`) |
 
 ---
 
